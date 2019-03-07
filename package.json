@@ -18,7 +18,7 @@
     "@types/express-serve-static-core": "^4.0.44",
     "@types/form-data": "0.0.33",
     "@types/jquery": "^2.0.41",
-    "@types/lodash": "https://registry.npmjs.org/@types/lodash/-/lodash-4.14.62.tgz",
+    "@types/lodash": "latest",
     "@types/mime": "0.0.29",
     "@types/mongodb": "^2.1.43",
     "@types/node": "^7.0.12",
@@ -35,7 +35,7 @@
     "basic-auth": "1.1.0",
     "basic-auth-connect": "1.0.0",
     "body-parser": "1.17.1",
-    "bufferutil": "^1.2.1",
+    "bufferutil": "4.0.0",
     "bunyan": "1.8.10",
     "collections": "5.0.6",
     "compression": "1.6.2",
@@ -56,10 +56,12 @@
     "shortid": "2.2.8",
     "socket.io": "^1.4.5",
     "socket.io-client": "1.7.3",
-    "typescript": "^2.4.1",
+    "typescript": "2.4.1",
     "typings": "2.1.0",
     "utf-8-validate": "^1.2.1",
-    "ws": "^1.0.1"
+    "ws": "^1.0.1",
+    "crc-32": "^1.2.0",
+    "pako": "1.0.7"
   },
   "devDependencies": {
     "mocha": "3.2.0"

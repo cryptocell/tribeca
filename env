@@ -28,10 +28,11 @@ CoinbaseApiKey=NULL
 CoinbaseSecret=NULL
 CoinbaseOrderDestination=Coinbase
 ## OkCoin
-OkCoinWsUrl=wss://real.okcoin.com:10440/websocket/okcoinapi
-OkCoinHttpUrl=https://www.okcoin.com/api/v1/
+OkCoinWsUrl=wss://real.okex.com:10442/ws/v3
+OkCoinHttpUrl=https://www.okcoin.com
 OkCoinApiKey=NULL
 OkCoinSecretKey=NULL
+OkCoinPassphrase=NULL
 OkCoinOrderDestination=OkCoin
 ## Bitfinex
 BitfinexHttpUrl=https://api.bitfinex.com/v1
