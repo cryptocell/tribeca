@@ -140,3 +140,20 @@ TODO:
 ### Donations
 
 If you would like to support this project, please consider donating to 1BDpAKp8qqTA1ASXxK2ekk8b8metHcdTxj
+
+
+### Problem Solution
+
+1. node-gyp fail:
+
+removing package-lock.json or npm-shrinkwrap.json and doing a new npm install fixes it. Since it updates the transitive dependencies’ version to new ones which actually has pre-built binaries available to download.
+
+2. Failed at the bufferutil@1.2.1 install script.
+
+updated bufferutil to 4.0.0
+
+3. after setup the env: TRIBECA_CONFIG_FILE, source it on the bash you are running the app.
+
+4. if you encounter the error about domain certificate not match,put this on the head of file:
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
