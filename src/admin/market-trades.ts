@@ -63,9 +63,9 @@ interface MarketTradeScope extends ng.IScope {
 }
 
 var MarketTradeGrid = ($scope: MarketTradeScope,
-                       $log: ng.ILogService,
-                       subscriberFactory: Shared.SubscriberFactory,
-                       uiGridConstants: any) => {
+    $log: ng.ILogService,
+    subscriberFactory: Shared.SubscriberFactory,
+    uiGridConstants: any) => {
     $scope.marketTrades = [];
     $scope.marketTradeOptions = {
         data: 'marketTrades',
@@ -76,11 +76,13 @@ var MarketTradeGrid = ($scope: MarketTradeScope,
         enableColumnResize: true,
         sortInfo: { fields: ['time'], directions: ['desc'] },
         columnDefs: [
-            { width: 80, field: 'time', displayName: 't', cellFilter: "momentShortDate",
+            {
+                width: 80, field: 'time', displayName: 't', cellFilter: "momentShortDate",
                 sortingAlgorithm: Shared.fastDiff,
-                sort: { direction: uiGridConstants.DESC, priority: 1} },
-            { width: 50, field: 'price', displayName: 'px' },
-            { width: 40, field: 'size', displayName: 'sz' },
+                sort: { direction: uiGridConstants.DESC, priority: 1 }
+            },
+            { width: 70, field: 'price', displayName: 'px' },
+            { width: 60, field: 'size', displayName: 'sz' },
             { width: 40, field: 'make_side', displayName: 'ms' },
             { width: 40, field: 'qBz', displayName: 'qBz' },
             { width: 50, field: 'qB', displayName: 'qB' },

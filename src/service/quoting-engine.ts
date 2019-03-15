@@ -30,20 +30,38 @@ import QuotingParameters = require("./quoting-parameters");
 import PositionManagement = require("./position-management");
 import moment = require('moment');
 import QuotingStyleRegistry = require("./quoting-styles/style-registry");
-import {QuoteInput} from "./quoting-styles/helpers";
+import { QuoteInput } from "./quoting-styles/helpers";
 import log from "./logging";
+
+const quoteChanged = (o: Models.Quote, n: Models.Quote, tick: number): boolean => {
+    if ((!o && n) || (o && !n)) return true;
+    if (!o && !n) return false;
+    const oPx = (o && o.price) || 0;
+    const nPx = (n && n.price) || 0;
+    if (Math.abs(oPx - nPx) > tick) return true;
+    const oSz = (o && o.size) || 0;
+    const nSz = (n && n.size) || 0;
+    return Math.abs(oSz - nSz) > .001;
+}
+
+const quotesChanged = (o: Models.TwoSidedQuote, n: Models.TwoSidedQuote, tick: number): boolean => {
+    if ((!o && n) || (o && !n)) return true;
+    if (!o && !n) return false;
+    if (quoteChanged(o.bid, n.bid, tick)) return true;
+    if (quoteChanged(o.ask, n.ask, tick)) return true;
+    return false;
+}
 
 export class QuotingEngine {
     private _log = log("quotingengine");
-
     public QuoteChanged = new Utils.Evt<Models.TwoSidedQuote>();
-
+    public MinQuoteChange = this._qlParamRepo.latest.width / 10;
     private _latest: Models.TwoSidedQuote = null;
     public get latestQuote() { return this._latest; }
     public set latestQuote(val: Models.TwoSidedQuote) {
-        if (!quotesChanged(this._latest, val, this._details.minTickIncrement)) 
+        //TODO: We are using width/10 as minium quote change factor. Changed from using this._details.minTickIncrement?
+        if (!quotesChanged(this._latest, val, this.MinQuoteChange))
             return;
-
         this._latest = val;
         this.QuoteChanged.trigger();
         this._quotePublisher.publish(this._latest);
@@ -63,7 +81,6 @@ export class QuotingEngine {
         private _targetPosition: PositionManagement.TargetBasePositionManager,
         private _safeties: Safety.SafetyCalculator) {
         var recalcWithoutInputTime = () => this.recalcQuote(_timeProvider.utcNow());
-
         _filteredMarkets.FilteredMarketChanged.on(m => this.recalcQuote(Utils.timeOrDefault(m, _timeProvider)));
         _qlParamRepo.NewParameters.on(recalcWithoutInputTime);
         _orderBroker.Trade.on(recalcWithoutInputTime);
@@ -71,7 +88,6 @@ export class QuotingEngine {
         _quotePublisher.registerSnapshot(() => this.latestQuote === null ? [] : [this.latestQuote]);
         _targetPosition.NewTargetPosition.on(recalcWithoutInputTime);
         _safeties.NewValue.on(recalcWithoutInputTime);
-        
         _timeProvider.setInterval(recalcWithoutInputTime, moment.duration(1, "seconds"));
     }
 
@@ -80,7 +96,7 @@ export class QuotingEngine {
         const minTick = this._details.minTickIncrement;
         const input = new QuoteInput(filteredMkt, fv, params, minTick);
         const unrounded = this._registry.Get(params.mode).GenerateQuote(input);
-        
+
         if (unrounded === null)
             return null;
 
@@ -100,36 +116,36 @@ export class QuotingEngine {
             return null;
         }
         const targetBasePosition = tbp.data;
-        
+
         const latestPosition = this._positionBroker.latestReport;
         const totalBasePosition = latestPosition.baseAmount + latestPosition.baseHeldAmount;
-        
+
         if (totalBasePosition < targetBasePosition - params.positionDivergence) {
             unrounded.askPx = null;
             unrounded.askSz = null;
             if (params.aggressivePositionRebalancing)
-                unrounded.bidSz = Math.min(params.aprMultiplier*params.size, targetBasePosition - totalBasePosition);
+                unrounded.bidSz = Math.min(params.aprMultiplier * params.size, targetBasePosition - totalBasePosition);
         }
-        
+
         if (totalBasePosition > targetBasePosition + params.positionDivergence) {
             unrounded.bidPx = null;
             unrounded.bidSz = null;
             if (params.aggressivePositionRebalancing)
-                unrounded.askSz = Math.min(params.aprMultiplier*params.size, totalBasePosition - targetBasePosition);
+                unrounded.askSz = Math.min(params.aprMultiplier * params.size, totalBasePosition - targetBasePosition);
         }
-        
+
         const safety = this._safeties.latest;
         if (safety === null) {
             return null;
         }
-        
+
         if (params.mode === Models.QuotingMode.PingPong) {
-          if (unrounded.askSz && safety.buyPing && unrounded.askPx < safety.buyPing + params.width)
-            unrounded.askPx = safety.buyPing + params.width;
-          if (unrounded.bidSz && safety.sellPong && unrounded.bidPx > safety.sellPong - params.width)
-            unrounded.bidPx = safety.sellPong - params.width;
+            if (unrounded.askSz && safety.buyPing && unrounded.askPx < safety.buyPing + params.width)
+                unrounded.askPx = safety.buyPing + params.width;
+            if (unrounded.bidSz && safety.sellPong && unrounded.bidPx > safety.sellPong - params.width)
+                unrounded.bidPx = safety.sellPong - params.width;
         }
-        
+
         if (safety.sell > params.tradesPerMinute) {
             unrounded.askPx = null;
             unrounded.askSz = null;
@@ -138,22 +154,22 @@ export class QuotingEngine {
             unrounded.bidPx = null;
             unrounded.bidSz = null;
         }
-        
+
         if (unrounded.bidPx !== null) {
             unrounded.bidPx = Utils.roundSide(unrounded.bidPx, minTick, Models.Side.Bid);
             unrounded.bidPx = Math.max(0, unrounded.bidPx);
         }
-        
+
         if (unrounded.askPx !== null) {
             unrounded.askPx = Utils.roundSide(unrounded.askPx, minTick, Models.Side.Ask);
             unrounded.askPx = Math.max(unrounded.bidPx + minTick, unrounded.askPx);
         }
-        
+
         if (unrounded.askSz !== null) {
             unrounded.askSz = Utils.roundDown(unrounded.askSz, minTick);
             unrounded.askSz = Math.max(minTick, unrounded.askSz);
         }
-        
+
         if (unrounded.bidSz !== null) {
             unrounded.bidSz = Utils.roundDown(unrounded.bidSz, minTick);
             unrounded.bidSz = Math.max(minTick, unrounded.bidSz);
@@ -186,58 +202,35 @@ export class QuotingEngine {
             this.quotesAreSame(new Models.Quote(genQt.bidPx, genQt.bidSz), this.latestQuote, Models.Side.Bid),
             this.quotesAreSame(new Models.Quote(genQt.askPx, genQt.askSz), this.latestQuote, Models.Side.Ask),
             t
-            );
+        );
     };
 
     private quotesAreSame(
-            newQ: Models.Quote, 
-            prevTwoSided: Models.TwoSidedQuote, 
-            side: Models.Side): Models.Quote {
-                
+        newQ: Models.Quote,
+        prevTwoSided: Models.TwoSidedQuote,
+        side: Models.Side): Models.Quote {
+
         if (newQ.price === null && newQ.size === null) return null;
         if (prevTwoSided == null) return newQ;
-        
+
         const previousQ = Models.Side.Bid === side ? prevTwoSided.bid : prevTwoSided.ask;
-        
+
         if (previousQ == null && newQ != null) return newQ;
         if (Math.abs(newQ.size - previousQ.size) > 5e-3) return newQ;
-        
+
         if (Math.abs(newQ.price - previousQ.price) < this._details.minTickIncrement) {
             return previousQ;
         }
-        
+
         let quoteWasWidened = true;
         if (Models.Side.Bid === side && previousQ.price < newQ.price) quoteWasWidened = false;
         if (Models.Side.Ask === side && previousQ.price > newQ.price) quoteWasWidened = false;
-        
+
         // prevent flickering
         if (!quoteWasWidened && Math.abs(Utils.fastDiff(new Date(), prevTwoSided.time)) < 300) {
             return previousQ;
         }
-        
+
         return newQ;
     }
-}
-
-const quoteChanged = (o: Models.Quote, n: Models.Quote, tick: number) : boolean => { 
-    if ((!o && n) || (o && !n)) return true;
-    if (!o && !n) return false;
-
-    const oPx = (o && o.price) || 0;
-    const nPx = (n && n.price) || 0;
-    if (Math.abs(oPx - nPx) > tick) 
-        return true;
-
-    const oSz = (o && o.size) || 0;
-    const nSz = (n && n.size) || 0;
-    return Math.abs(oSz - nSz) > .001;
-}
-
-const quotesChanged = (o: Models.TwoSidedQuote, n: Models.TwoSidedQuote, tick: number) : boolean => {
-    if ((!o && n) || (o && !n)) return true;
-    if (!o && !n) return false;
-
-    if (quoteChanged(o.bid, n.bid, tick)) return true;
-    if (quoteChanged(o.ask, n.ask, tick)) return true;
-    return false;
 }

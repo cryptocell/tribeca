@@ -34,14 +34,14 @@ export interface IOrderEntryGateway extends IGateway {
     sendOrder(order: Models.OrderStatusReport): void;
     cancelOrder(cancel: Models.OrderStatusReport): void;
     replaceOrder(replace: Models.OrderStatusReport): void;
-    
+
     OrderUpdate: Utils.Evt<Models.OrderStatusUpdate>;
-    
+
     cancelsByClientOrderId: boolean;
     generateClientOrderId(): string;
-    
-    supportsCancelAllOpenOrders() : boolean;
-    cancelAllOpenOrders() : q.Promise<number>;
+
+    supportsCancelAllOpenOrders(): boolean;
+    cancelAllOpenOrders(): q.Promise<number>;
 }
 
 export interface IPositionGateway {
@@ -74,7 +74,7 @@ export interface IOrderBroker extends ITradeBroker {
     sendOrder(order: Models.SubmitNewOrder): Models.SentOrder;
     cancelOrder(cancel: Models.OrderCancel);
     replaceOrder(replace: Models.CancelReplaceOrder): Models.SentOrder;
-    OrderUpdate: Utils.Evt<Models.OrderStatusReport>;
+    BrokerOrderUpdate: Utils.Evt<Models.OrderStatusReport>;
     cancelOpenOrders(): void;
 }
 

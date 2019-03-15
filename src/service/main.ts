@@ -114,8 +114,8 @@ function ParseCurrencyPair(raw: string): Models.CurrencyPair {
 const pair = ParseCurrencyPair(config.GetString("TradedPair"));
 
 const defaultActive: Models.SerializedQuotesActive = new Models.SerializedQuotesActive(false, new Date(1));
-const defaultQuotingParameters: Models.QuotingParameters = new Models.QuotingParameters(.3, .05, Models.QuotingMode.Top,
-    Models.FairValueModel.BBO, 3, .8, false, Models.AutoPositionMode.Off, false, 2.5, 300, .095, 2 * .095, .095, 3, .1);
+/*                                                                                    width,size,mode,                   fvModel,                 tbp, pDiv,ewma, apMode,                      apr?, trds, /sec,lEwma, sEwma,  qEwma, aprMultiplier, stepOverSize */
+const defaultQuotingParameters: Models.QuotingParameters = new Models.QuotingParameters(.3, .05, Models.QuotingMode.Top, Models.FairValueModel.BBO, 3, .8, false, Models.AutoPositionMode.Off, false, 2.5, 300, .095, 2 * .095, .095, 3, .1);
 
 const backTestSimulationSetup = (inputData: Array<Models.Market | Models.MarketTrade>, parameters: Backtest.BacktestParameters): SimulationClasses => {
     const timeProvider: Utils.ITimeProvider = new Backtest.BacktestTimeProvider(moment(_.first(inputData).time), moment(_.last(inputData).time));
@@ -356,11 +356,13 @@ const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
         new TopJoin.PingPongQuoteStyle(),
         new Depth.DepthQuoteStyle()
     ]);
-
+    //MARK: Engine Of System
     const positionMgr = new PositionManagement.PositionManager(broker, timeProvider, rfvPersister, fvEngine, initRfv, shortEwma, longEwma);
     const tbp = new PositionManagement.TargetBasePositionManager(timeProvider, positionMgr, paramsRepo, positionBroker, targetBasePositionPublisher, tbpPersister);
+    //MARK: Quote Producer
     const quotingEngine = new QuotingEngine.QuotingEngine(registry, timeProvider, filtration, fvEngine, paramsRepo, quotePublisher,
         orderBroker, positionBroker, broker, ewma, tbp, safetyCalculator);
+    //MARK: Quote Sender
     const quoteSender = new QuoteSender.QuoteSender(timeProvider, quotingEngine, quoteStatusPublisher, quoter, active, positionBroker, fvEngine, marketDataBroker, broker);
 
     const marketTradeBroker = new MarketTrades.MarketTradeBroker(gateway.md, marketTradePublisher, marketDataBroker,

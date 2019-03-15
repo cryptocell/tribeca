@@ -56,14 +56,13 @@ export class Quoter {
 export class ExchangeQuoter {
     private _activeQuote: QuoteOrder = null;
     private _exchange: Models.Exchange;
-
     public quotesSent: QuoteOrder[] = [];
 
     constructor(private _broker: Interfaces.IOrderBroker,
         private _exchBroker: Interfaces.IBroker,
         private _side: Models.Side) {
         this._exchange = _exchBroker.exchange();
-        this._broker.OrderUpdate.on(this.handleOrderUpdate);
+        this._broker.BrokerOrderUpdate.on(this.handleOrderUpdate);
     }
 
     private handleOrderUpdate = (o: Models.OrderStatusReport) => {
@@ -75,7 +74,6 @@ export class ExchangeQuoter {
                 if (bySide !== null && bySide.orderId === o.orderId) {
                     this._activeQuote = null;
                 }
-
                 this.quotesSent = this.quotesSent.filter(q => q.orderId !== o.orderId);
         }
     };

@@ -7,6 +7,8 @@
     "WebClientPassword": "NULL",
     "WebClientListenPort": "3000",
     "ShowAllOrders": "true",
+    "MinTickIncrement": 0.0001,
+
 
     "HitBtcPullUrl": "http://demo-api.hitbtc.com",
     "HitBtcOrderEntryUrl": "ws://demo-api.hitbtc.com:8080",
