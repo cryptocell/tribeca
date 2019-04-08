@@ -1,5 +1,6 @@
 import * as _ from "lodash";
 import * as moment from "moment"
+import Interfaces = require("../service/interfaces");
 
 export interface ITimestamped {
     time: Date;
@@ -153,6 +154,19 @@ export class SentOrder {
     constructor(public sentOrderClientId: string) { }
 }
 
+export class OrderStateCache implements Interfaces.IOrderStateCache {
+    public allOrders = new Map<string, OrderStatusReport>();
+    public exchIdsToClientIds = new Map<string, string>();
+    constructor() { }
+}
+
+export class OrderCachePersistable {
+    public allOrders: OrderStatusReport[] = [];
+    constructor(allOrders: OrderStatusReport[]) {
+        this.allOrders = allOrders;
+    }
+}
+
 export interface OrderStatusReport {
     pair: CurrencyPair;
     side: Side;
@@ -164,6 +178,7 @@ export interface OrderStatusReport {
     orderId: string;
     exchangeId: string;
     orderStatus: OrderStatus;
+    rejectCode: number; //New
     rejectMessage: string;
     time: Date;
     lastQuantity: number;
@@ -241,8 +256,7 @@ export enum QuoteAction { New, Cancel }
 export enum QuoteSent { First, Modify, UnsentDuplicate, Delete, UnsentDelete, UnableToSend }
 
 export class Quote {
-    constructor(public price: number,
-        public size: number) { }
+    constructor(public price: number, public size: number) { }
 }
 
 export class TwoSidedQuote implements ITimestamped {

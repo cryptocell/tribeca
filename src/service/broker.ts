@@ -54,15 +54,18 @@ export class MarketDataBroker implements Interfaces.IMarketDataBroker {
     }
 }
 
-export class OrderStateCache implements Interfaces.IOrderStateCache {
-    public allOrders = new Map<string, Models.OrderStatusReport>();
-    public exchIdsToClientIds = new Map<string, string>();
-}
+// export class OrderStateCache implements Interfaces.IOrderStateCache {
+//     public allOrders = new Map<string, Models.OrderStatusReport>();
+//     public exchIdsToClientIds = new Map<string, string>();
+//     constructor(public persister: Persister.IPersist<Models.OrderStatusReport>) { }
+// }
 
 export class OrderBroker implements Interfaces.IOrderBroker {
     private _log = log("oe:broker");
     BrokerOrderUpdate = new Utils.Evt<Models.OrderStatusReport>();
     private _cancelsWaitingForExchangeOrderId: { [clId: string]: Models.OrderCancel } = {};
+    private _cancelsWaitingForOrderAccepted: { [clId: string]: Models.OrderCancel } = {};
+
     Trade = new Utils.Evt<Models.Trade>();
     _trades: Models.Trade[] = [];
     private _pendingRemovals = new Array<Models.OrderStatusReport>();
@@ -73,18 +76,47 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         private _oeGateway: Interfaces.IOrderEntryGateway,
         private _orderPersister: Persister.IPersist<Models.OrderStatusReport>,
         private _tradePersister: Persister.IPersist<Models.Trade>,
+        private _orderStatusCachePersister: Persister.ILoadLatest<Models.OrderCachePersistable>,
         private _orderStatusPublisher: Messaging.IPublish<Models.OrderStatusReport>,
         private _tradePublisher: Messaging.IPublish<Models.Trade>,
         private _submittedOrderReciever: Messaging.IReceive<Models.OrderRequestFromUI>,
         private _cancelOrderReciever: Messaging.IReceive<Models.OrderStatusReport>,
         private _cancelAllOrdersReciever: Messaging.IReceive<Models.CancelAllOrdersRequest>,
         private _messages: Messages.MessagesPubisher,
-        private _orderCache: OrderStateCache,
+        private _orderCache: Models.OrderStateCache,
         initOrders: Models.OrderStatusReport[],
         initTrades: Models.Trade[],
         private readonly _publishAllOrders: boolean) {
-        _.each(initOrders, this.addOrderStatusInMemory);
+
         _.each(initTrades, t => this._trades.push(t));
+
+        this._oeGateway.ConnectChanged.on(cs => {
+
+            if (cs == Models.ConnectivityStatus.Connected) {
+
+                _orderStatusCachePersister.loadLatest().then((orderCache) => {
+                    this._log.info("Original Cache Size = %s", orderCache.allOrders.length);
+
+                    orderCache.allOrders.forEach((order) => {
+                        this._log.info("Loading Cache! [ %s || %s ] Status: %s --- PendingCancel: %s --- CancelRejected: %s --- Price: %s", order.orderId, order.exchangeId, order.orderStatus, order.pendingCancel, order.cancelRejected, order.price);
+
+                        if (!Models.orderIsDone(order.orderStatus)) {
+                            this._orderCache.allOrders.set(order.orderId, order);
+                            this._orderCache.exchIdsToClientIds.set(order.exchangeId, order.orderId);
+                        } else if (order.orderStatus === Models.OrderStatus.Rejected && !order.cancelRejected) {
+                            this._orderCache.allOrders.set(order.orderId, order);
+                            this._orderCache.exchIdsToClientIds.set(order.exchangeId, order.orderId);
+                        }
+                    });
+
+                    this._log.info("Loaded Cache Size = %s", _orderCache.allOrders.size);
+                    this.cancelOpenOrders(true);
+                }, (err) => {
+                    this._log.warn("Failed to load Order Cache! [ %o ]", err);
+                });
+            }
+        });
+
 
         _orderStatusPublisher.registerSnapshot(() => this.orderStatusSnapshot());
         _tradePublisher.registerSnapshot(() => _.takeRight(this._trades, 100));
@@ -112,7 +144,7 @@ export class OrderBroker implements Interfaces.IOrderBroker {
 
         _cancelAllOrdersReciever.registerReceiver(o => {
             this._log.info("handling cancel all orders request");
-            this.cancelOpenOrders()
+            this.cancelOpenOrders(false)
                 .then(x => this._log.info("cancelled all ", x, " open orders"),
                     e => this._log.error(e, "error when cancelling all orders!"));
         });
@@ -124,8 +156,7 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         this._timeProvider.setInterval(this.clearPendingRemovals, moment.duration(5, "seconds"));
     }
 
-
-    async cancelOpenOrders(): Promise<number> {
+    async cancelOpenOrders(cancelPendingCancel: boolean): Promise<number> {
         if (this._oeGateway.supportsCancelAllOpenOrders()) {
             return this._oeGateway.cancelAllOpenOrders();
         }
@@ -137,8 +168,16 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         };
         this.BrokerOrderUpdate.on(orderUpdate);
         for (let e of this._orderCache.allOrders.values()) {
-            if (e.pendingCancel || Models.orderIsDone(e.orderStatus))
+            if (e.orderStatus === Models.OrderStatus.Complete
+                || e.orderStatus === Models.OrderStatus.Cancelled)
                 continue;
+            else if (!cancelPendingCancel && e.pendingCancel) continue;
+            // Try to cancel ALL unfinished orders.(New,Working,Other)
+            if (typeof e.exchangeId === "undefined" || e.exchangeId === null)
+                e.orderStatus = Models.OrderStatus.New;
+            else
+                e.orderStatus = Models.OrderStatus.Working;
+
             this.cancelOrder(new Models.OrderCancel(e.orderId, e.exchange, this._timeProvider.utcNow()));
             promiseMap.set(e.orderId, Q.defer<void>());
         }
@@ -167,7 +206,10 @@ export class OrderBroker implements Interfaces.IOrderBroker {
             preferPostOnly: order.preferPostOnly,
             exchange: this._baseBroker.exchange(),
             rejectMessage: order.msg,
-            source: order.source
+            source: order.source,
+            cancelRejected: false,
+            pendingReplace: false,
+            pendingCancel: false
         };
         this._oeGateway.sendOrder(this.updateOrderState(rpt));
         return new Models.SentOrder(rpt.orderId);
@@ -182,6 +224,8 @@ export class OrderBroker implements Interfaces.IOrderBroker {
             orderId: replace.origOrderId,
             orderStatus: Models.OrderStatus.Working,
             pendingReplace: true,
+            pendingCancel: false,
+            cancelRejected: false,
             price: this.roundPrice(replace.price, rpt.side),
             quantity: replace.quantity
         };
@@ -189,103 +233,68 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         return new Models.SentOrder(report.orderId);
     };
 
+    //MARK: new,working,rejected
     cancelOrder = (cancel: Models.OrderCancel) => {
         const rpt = this._orderCache.allOrders.get(cancel.origOrderId);
-        if (!this._oeGateway.cancelsByClientOrderId) {
-            //MARK: race condition! i cannot cancel an order before I get the exchangeId (oid); register it for deletion on the ack
-            if (typeof rpt.exchangeId === "undefined") {
+        // if (!rpt) throw new Error("Unknown order, cannot cancel " + cancel.origOrderId);
+        if (!rpt) {
+            this._log.warn("Unknown Order %s", cancel.origOrderId);
+            return;
+        }
+        //Order is done
+        if (rpt.orderStatus === Models.OrderStatus.Complete
+            || rpt.orderStatus === Models.OrderStatus.Cancelled) return;
+
+        //New order
+        if (rpt.orderStatus === Models.OrderStatus.New
+            || typeof rpt.exchangeId === "undefined"
+            || rpt.exchangeId === null) {
+            if (!this._oeGateway.cancelsByClientOrderId) {
                 this._cancelsWaitingForExchangeOrderId[rpt.orderId] = cancel;
                 this._log.info("Registered %s for late deletion", rpt.orderId);
-                return;
+            } else {
+                this._cancelsWaitingForOrderAccepted[rpt.orderId] = cancel;
+                this._log.info("Registered %s for late deletion", rpt.orderId);
             }
+            return;
         }
-        if (!rpt) {
-            throw new Error("Unknown order, cannot cancel " + cancel.origOrderId);
-        }
-        const report: Models.OrderStatusUpdate = {
+
+
+        //captured by updateOrderState -> working
+        let report: Models.OrderStatusUpdate = {
             orderId: cancel.origOrderId,
-            orderStatus: Models.OrderStatus.Working,
-            pendingCancel: true
+            exchangeId: rpt.exchangeId,
+            orderStatus: rpt.orderStatus,
+            pendingCancel: true,
+            cancelRejected: false,
+            pendingReplace: false
         };
-        this._oeGateway.cancelOrder(this.updateOrderState(report));
+        let updatedOrderStated = this.updateOrderState(report);
+        this._oeGateway.cancelOrder(updatedOrderStated);
     };
 
-
     public updateOrderState = (osr: Models.OrderStatusUpdate): Models.OrderStatusReport => {
-        let orig: Models.OrderStatusUpdate;
-        if (osr.orderStatus === Models.OrderStatus.New) {
-            orig = osr;
-        } else {
-            orig = this._orderCache.allOrders.get(osr.orderId);
-            if (typeof orig === "undefined") {
-                // this step and _exchIdsToClientIds is really BS, the exchanges should get their act together
-                const secondChance = this._orderCache.exchIdsToClientIds.get(osr.exchangeId);
-                if (typeof secondChance !== "undefined") {
-                    osr.orderId = secondChance;
-                    orig = this._orderCache.allOrders.get(secondChance);
-                }
-            }
 
-            if (typeof orig === "undefined") {
-                this._log.error({
-                    update: osr,
-                    existingExchangeIdsToClientIds: this._orderCache.exchIdsToClientIds,
-                    existingIds: Array.from(this._orderCache.allOrders.keys())
-                }, "no existing order for non-New update!");
-                return;
-            }
+        let orig: Models.OrderStatusUpdate = this.getOrderFromMemory(osr);
+        if (typeof orig === "undefined") {
+            this._log.error({
+                update: osr,
+                existingExchangeIdsToClientIds: this._orderCache.exchIdsToClientIds,
+                existingIds: Array.from(this._orderCache.allOrders.keys())
+            }, "no existing order for non-New update!");
+            return;
         }
 
-        //MARK: Updating OR Merging Orders Detail!
-        const getOrFallback = <T>(n: T, o: T) => typeof n !== "undefined" ? n : o;
-        const q = getOrFallback(osr.quantity, orig.quantity);
-        let cumQ: number = (typeof osr.cumQuantity) !== "undefined" ? osr.cumQuantity : (getOrFallback(orig.cumQuantity, 0) + getOrFallback(osr.lastQuantity, 0));
-        const o: Models.OrderStatusReport = {
-            pair: getOrFallback(osr.pair, orig.pair),
-            side: getOrFallback(osr.side, orig.side),
-            quantity: q,
-            type: getOrFallback(osr.type, orig.type),
-            price: getOrFallback(osr.price, orig.price),
-            timeInForce: getOrFallback(osr.timeInForce, orig.timeInForce),
-            orderId: getOrFallback(osr.orderId, orig.orderId),
-            exchangeId: getOrFallback(osr.exchangeId, orig.exchangeId),
-            orderStatus: getOrFallback(osr.orderStatus, orig.orderStatus),
-            rejectMessage: osr.rejectMessage,
-            time: getOrFallback(osr.time, this._timeProvider.utcNow()),
-            lastQuantity: osr.lastQuantity,
-            lastPrice: osr.lastPrice,
-            leavesQuantity: getOrFallback(osr.leavesQuantity, orig.leavesQuantity),
-            cumQuantity: cumQ,
-            averagePrice: cumQ > 0 ? osr.averagePrice || orig.averagePrice : undefined,
-            liquidity: getOrFallback(osr.liquidity, orig.liquidity),
-            exchange: getOrFallback(osr.exchange, orig.exchange),
-            computationalLatency: getOrFallback(osr.computationalLatency, 0) + getOrFallback(orig.computationalLatency, 0),
-            version: (typeof orig.version === "undefined") ? 0 : orig.version + 1,
-            partiallyFilled: cumQ > 0 && cumQ !== q,
-            pendingCancel: osr.pendingCancel,
-            pendingReplace: osr.pendingReplace,
-            cancelRejected: osr.cancelRejected,
-            preferPostOnly: getOrFallback(osr.preferPostOnly, orig.preferPostOnly),
-            source: getOrFallback(osr.source, orig.source)
-        };
+        let o: Models.OrderStatusReport = this.getOrFallback(osr, orig);
 
-        const added = this.updateOrderStatusInMemory(o);
-        if (this._log.debug())
-            this._log.debug(o, (added ? "added" : "removed") + " order status");
+        // MARK: Add order to cache OR delete it from cache.
+        const added = this.updateOrderInMemory(o);
+        if (this._log.debug()) this._log.debug(o, (added ? "added" : "removed") + " order status");
 
-        // cancel any open orders waiting for oid
-        if (!this._oeGateway.cancelsByClientOrderId
-            && typeof o.exchangeId !== "undefined"
-            && o.orderId in this._cancelsWaitingForExchangeOrderId) {
-            this._log.info("Deleting %s late, oid: %s", o.exchangeId, o.orderId);
-            const cancel = this._cancelsWaitingForExchangeOrderId[o.orderId];
-            delete this._cancelsWaitingForExchangeOrderId[o.orderId];
-            this.cancelOrder(cancel);
-        }
-
+        // MARK: Publish and persist order
         this.BrokerOrderUpdate.trigger(o);
         this._orderPersister.persist(o);
-        // MARK: Publish Order
+
         if (this.shouldPublish(o))
             this._orderStatusPublisher.publish(o);
 
@@ -311,18 +320,88 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         return o;
     };
 
-    private updateOrderStatusInMemory = (osr: Models.OrderStatusReport): boolean => {
-        if (this.shouldPublish(osr) || !Models.orderIsDone(osr.orderStatus)) {
-            this.addOrderStatusInMemory(osr);
-            return true;
+    private getOrderFromMemory = (osr: Models.OrderStatusUpdate): Models.OrderStatusUpdate => {
+        this._log.info("Cache Size = %s", this._orderCache.allOrders.size);
+        let orig: Models.OrderStatusUpdate;
+        if (osr.orderStatus === Models.OrderStatus.New) {
+            orig = osr;
+        } else {
+            orig = this._orderCache.allOrders.get(osr.orderId);
+            if (typeof orig === "undefined") {
+                const secondChance = this._orderCache.exchIdsToClientIds.get(osr.exchangeId);
+                if (typeof secondChance !== "undefined") {
+                    osr.orderId = secondChance;
+                    orig = this._orderCache.allOrders.get(secondChance);
+                }
+            }
+            if (typeof orig === "undefined") {
+                const now = new Date().getTime();
+                for (let order of this._orderCache.allOrders.values()) {
+                    if ((typeof order.exchangeId === "undefined" || order.exchangeId === null)
+                        && order.exchange === osr.exchange
+                        && order.pair === osr.pair
+                        && order.side === osr.side
+                        && order.price === osr.price
+                        && order.quantity === osr.quantity
+                        && now - order.time.getTime() > 10 * 1000) {
+                        order.exchangeId = osr.exchangeId;
+                        osr.orderId = order.orderId;
+                        orig = order;
+                        break;
+                    }
+                }
+            }
         }
-        else {
+        return orig;
+    }
+
+    private updateOrderInMemory = (osr: Models.OrderStatusReport): boolean => {
+        //TODO: if (this.shouldPublish(osr) || !Models.orderIsDone(osr.orderStatus)) {
+        if (!Models.orderIsDone(osr.orderStatus)) {
+            if (!this._oeGateway.cancelsByClientOrderId
+                && typeof osr.exchangeId !== "undefined"
+                && osr.orderId in this._cancelsWaitingForExchangeOrderId) {
+                this._log.info("Deleting %s late, oid: %s", osr.exchangeId, osr.orderId);
+                const cancel = this._cancelsWaitingForExchangeOrderId[osr.orderId];
+                delete this._cancelsWaitingForExchangeOrderId[osr.orderId];
+                this.cancelOrder(cancel);
+            } else if ((osr.orderStatus === Models.OrderStatus.Working || osr.orderStatus === Models.OrderStatus.New)
+                && osr.orderId in this._cancelsWaitingForOrderAccepted) {
+                this._log.info("Deleting %s late, oid: %s", osr.exchangeId, osr.orderId);
+                const cancel = this._cancelsWaitingForOrderAccepted[osr.orderId];
+                delete this._cancelsWaitingForOrderAccepted[osr.orderId];
+                this.cancelOrder(cancel);
+            } else if (osr.orderStatus === Models.OrderStatus.Other
+                && osr.orderId in this._cancelsWaitingForOrderAccepted) {
+                this._log.info("Still no exchangeId. Deleting %s again in 10s!", osr.orderId);
+                const cancel = this._cancelsWaitingForOrderAccepted[osr.orderId];
+                delete this._cancelsWaitingForOrderAccepted[osr.orderId];
+                setTimeout(() => { this.cancelOrder(cancel); }, 10 * 1000);
+            } else if (osr.orderStatus === Models.OrderStatus.Other) {
+                osr.orderStatus = Models.OrderStatus.Working;
+                this._log.info("Deleting %s again in 10s!", osr.orderId);
+                const cancel = new Models.OrderCancel(osr.orderId, osr.exchange, this._timeProvider.utcNow());
+                setTimeout(() => { this.cancelOrder(cancel); }, 10 * 1000);
+            }
+            this.addOrderInMemory(osr);
+            return true;
+        } else {
+            if (osr.orderStatus === Models.OrderStatus.Rejected && osr.cancelRejected) {
+                this.addOrderInMemory(osr);
+                this._log.info("Retry to cancel %s", osr.orderId);
+                osr.orderStatus = Models.OrderStatus.Working;
+                osr.cancelRejected = false;
+                let cancel = new Models.OrderCancel(osr.orderId, osr.exchange, this._timeProvider.utcNow());
+                this.cancelOrder(cancel);
+                return true;
+            }
             this._pendingRemovals.push(osr);
             return false;
         }
     };
 
-    private addOrderStatusInMemory = (osr: Models.OrderStatusReport) => {
+    private addOrderInMemory = (osr: Models.OrderStatusReport) => {
+        this._log.info("Add %s oid: %s to orderCache", osr.exchangeId, osr.orderId);
         this._orderCache.exchIdsToClientIds.set(osr.exchangeId, osr.orderId);
         this._orderCache.allOrders.set(osr.orderId, osr);
     };
@@ -331,13 +410,11 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         const now = new Date().getTime();
         const kept = new Array<Models.OrderStatusReport>();
         for (let osr of this._pendingRemovals) {
-            if (now - osr.time.getTime() > 5000) {
+            if (now - osr.time.getTime() > 5 * 1000) {
                 this._orderCache.exchIdsToClientIds.delete(osr.exchangeId);
                 this._orderCache.allOrders.delete(osr.orderId);
-            }
-            else {
+            } else
                 kept.push(osr);
-            }
         }
         this._pendingRemovals = kept;
     };
@@ -347,16 +424,49 @@ export class OrderBroker implements Interfaces.IOrderBroker {
         if (this._publishAllOrders) return true;
         switch (o.source) {
             case Models.OrderSource.Quote:
-            // if (o.orderStatus !== Models.OrderStatus.Cancelled) {
-            //     return true;
-            // }
-            // return false;
             case Models.OrderSource.Unknown:
                 return false;
             default:
                 return true;
         }
     };
+
+
+    private getOrFallback = (osr: Models.OrderStatusUpdate, orig: Models.OrderStatusUpdate): Models.OrderStatusReport => {
+        let getOrFallback = <T>(n: T, o: T) => typeof n !== "undefined" ? n : o;
+        let q = getOrFallback(osr.quantity, orig.quantity);
+        let cumQ: number = (typeof osr.cumQuantity) !== "undefined" ? osr.cumQuantity : (getOrFallback(orig.cumQuantity, 0) + getOrFallback(osr.lastQuantity, 0));
+        let o: Models.OrderStatusReport = {
+            pair: getOrFallback(osr.pair, orig.pair),
+            side: getOrFallback(osr.side, orig.side),
+            quantity: q,
+            type: getOrFallback(osr.type, orig.type),
+            price: getOrFallback(osr.price, orig.price),
+            timeInForce: getOrFallback(osr.timeInForce, orig.timeInForce),
+            orderId: getOrFallback(osr.orderId, orig.orderId),
+            exchangeId: getOrFallback(osr.exchangeId, orig.exchangeId),
+            orderStatus: getOrFallback(osr.orderStatus, orig.orderStatus),
+            rejectCode: osr.rejectCode,
+            rejectMessage: osr.rejectMessage,
+            time: getOrFallback(osr.time, this._timeProvider.utcNow()),
+            lastQuantity: osr.lastQuantity,
+            lastPrice: osr.lastPrice,
+            leavesQuantity: getOrFallback(osr.leavesQuantity, orig.leavesQuantity),
+            cumQuantity: cumQ,
+            averagePrice: cumQ > 0 ? osr.averagePrice || orig.averagePrice : undefined,
+            liquidity: getOrFallback(osr.liquidity, orig.liquidity),
+            exchange: getOrFallback(osr.exchange, orig.exchange),
+            computationalLatency: getOrFallback(osr.computationalLatency, 0) + getOrFallback(orig.computationalLatency, 0),
+            version: (typeof orig.version === "undefined") ? 0 : orig.version + 1,
+            partiallyFilled: cumQ > 0 && cumQ !== q,
+            pendingCancel: getOrFallback(osr.pendingCancel, orig.pendingCancel),
+            pendingReplace: getOrFallback(osr.pendingReplace, orig.pendingReplace),
+            cancelRejected: getOrFallback(osr.cancelRejected, orig.cancelRejected),
+            preferPostOnly: getOrFallback(osr.preferPostOnly, orig.preferPostOnly),
+            source: getOrFallback(osr.source, orig.source)
+        };
+        return o;
+    }
 
     private orderStatusSnapshot = (): Models.OrderStatusReport[] => {
         return Array.from(this._orderCache.allOrders.values()).filter(this.shouldPublish);

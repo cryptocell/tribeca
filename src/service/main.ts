@@ -101,6 +101,11 @@ process.on("SIGINT", () => {
     performExit();
 });
 
+process.on("SIGTERM", () => {
+    mainLog.info("Handling SIGTERM");
+    performExit();
+});
+
 const mainLog = log("tribeca:main");
 const messagingLog = log("tribeca:messaging");
 
@@ -114,15 +119,31 @@ function ParseCurrencyPair(raw: string): Models.CurrencyPair {
 const pair = ParseCurrencyPair(config.GetString("TradedPair"));
 
 const defaultActive: Models.SerializedQuotesActive = new Models.SerializedQuotesActive(false, new Date(1));
-/*                                                                                    width,size,mode,                   fvModel,                 tbp, pDiv,ewma, apMode,                      apr?, trds, /sec,lEwma, sEwma,  qEwma, aprMultiplier, stepOverSize */
-const defaultQuotingParameters: Models.QuotingParameters = new Models.QuotingParameters(.3, .05, Models.QuotingMode.Top, Models.FairValueModel.BBO, 3, .8, false, Models.AutoPositionMode.Off, false, 2.5, 300, .095, 2 * .095, .095, 3, .1);
+const defaultQuotingParameters: Models.QuotingParameters = new Models.QuotingParameters(
+    0.3,    //width
+    0.05,   //size
+    Models.QuotingMode.Top, //mode
+    Models.FairValueModel.BBO,  //fvModel
+    3,  //tbp ( targetBasePosition )
+    0.8,    //pDiv ( positionDivergence )
+    false,  //ewma
+    Models.AutoPositionMode.Off,    //apMode
+    false,  //apr? (aggressivePositionRebalancing )
+    2.5,    //trds （ tradesPerMinute ）
+    300,    // /sec （ tradeRateSeconds ）
+    0.095,  //lEwma
+    2 * 0.095,  //sEwma
+    0.095,  //qEwma
+    3,  //aprMultiplier
+    0.1 //stepOverSize
+);
 
 const backTestSimulationSetup = (inputData: Array<Models.Market | Models.MarketTrade>, parameters: Backtest.BacktestParameters): SimulationClasses => {
     const timeProvider: Utils.ITimeProvider = new Backtest.BacktestTimeProvider(moment(_.first(inputData).time), moment(_.last(inputData).time));
     const exchange = Models.Exchange.Null;
     const gw = new Backtest.BacktestGateway(inputData, parameters.startingBasePosition, parameters.startingQuotePosition, <Backtest.BacktestTimeProvider>timeProvider);
 
-    const getExch = async (orderCache: Broker.OrderStateCache): Promise<Interfaces.CombinedGateway> => new Backtest.BacktestExchange(gw);
+    const getExch = async (orderCache: Models.OrderStateCache): Promise<Interfaces.CombinedGateway> => new Backtest.BacktestExchange(gw);
 
     const getPublisher = <T>(topic: string, persister?: Persister.ILoadAll<T>): Messaging.IPublish<T> => {
         return new Messaging.NullPublisher<T>();
@@ -185,7 +206,7 @@ const liveTradingSetup = (): SimulationClasses => {
 
     const exchange = getExchange();
 
-    const getExch = (orderCache: Broker.OrderStateCache): Promise<Interfaces.CombinedGateway> => {
+    const getExch = (orderCache: Models.OrderStateCache): Promise<Interfaces.CombinedGateway> => {
         switch (exchange) {
             case Models.Exchange.HitBtc: return HitBtc.createHitBtc(config, pair);
             case Models.Exchange.Coinbase: return Coinbase.createCoinbase(config, orderCache, timeProvider, pair);
@@ -235,7 +256,7 @@ interface SimulationClasses {
     startingActive: Models.SerializedQuotesActive;
     startingParameters: Models.QuotingParameters;
     timeProvider: Utils.ITimeProvider;
-    getExch(orderCache: Broker.OrderStateCache): Promise<Interfaces.CombinedGateway>;
+    getExch(orderCache: Models.OrderStateCache): Promise<Interfaces.CombinedGateway>;
     getReceiver<T>(topic: string): Messaging.IReceive<T>;
     getPersister<T extends Persister.Persistable>(collectionName: string): Promise<Persister.ILoadAll<T>>;
     getRepository<T>(defValue: T, collectionName: string): Promise<Persister.ILoadLatest<T>>;
@@ -243,6 +264,12 @@ interface SimulationClasses {
 }
 
 const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
+    const persistableOrderCache = new Models.OrderCachePersistable([]);
+
+    const orderCache = new Models.OrderStateCache();
+    const timeProvider = classes.timeProvider;
+    const getPublisher = classes.getPublisher;
+
     const getPersister = classes.getPersister;
     const orderPersister = await getPersister<Models.OrderStatusReport>("osr");
     const tradesPersister = await getPersister<Models.Trade>("trades");
@@ -257,15 +284,19 @@ const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
 
     const activePersister = await classes.getRepository<Models.SerializedQuotesActive>(classes.startingActive, Messaging.Topics.ActiveChange);
     const paramsPersister = await classes.getRepository<Models.QuotingParameters>(classes.startingParameters, Messaging.Topics.QuotingParametersChange);
+    const orderCachePersister = await classes.getRepository<Models.OrderCachePersistable>(persistableOrderCache, "osc");
 
     const exchange = classes.exchange;
 
     const shouldPublishAllOrders = !config.Has("ShowAllOrders") || config.GetBoolean("ShowAllOrders");
-    const ordersFilter = shouldPublishAllOrders ? {} : { source: { $gte: Models.OrderSource.OrderTicket } };
+    const ordersFilter = shouldPublishAllOrders ?
+        {} : {
+            source: { $gte: Models.OrderSource.OrderTicket }
+        };
 
     const [
         initOrders, initTrades, initMktTrades, initMsgs, initParams, initActive, initRfv] = await Promise.all([
-            orderPersister.loadAll(10000, ordersFilter),
+            orderPersister.loadAll(10000, ordersFilter, -1),
             tradesPersister.loadAll(10000),
             mktTradePersister.loadAll(100),
             messagesPersister.loadAll(50),
@@ -277,9 +308,7 @@ const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
     _.defaults(initParams, defaultQuotingParameters);
     _.defaults(initActive, defaultActive);
 
-    const orderCache = new Broker.OrderStateCache();
-    const timeProvider = classes.timeProvider;
-    const getPublisher = classes.getPublisher;
+
 
     const gateway = await classes.getExch(orderCache);
 
@@ -321,7 +350,7 @@ const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
         hasSelfTradePrevention: broker.hasSelfTradePrevention,
     }, "using the following exchange details");
 
-    const orderBroker = new Broker.OrderBroker(timeProvider, broker, gateway.oe, orderPersister, tradesPersister, orderStatusPublisher,
+    const orderBroker = new Broker.OrderBroker(timeProvider, broker, gateway.oe, orderPersister, tradesPersister, orderCachePersister, orderStatusPublisher,
         tradePublisher, submitOrderReceiver, cancelOrderReceiver, cancelAllOrdersReceiver, messages, orderCache, initOrders, initTrades, shouldPublishAllOrders);
     const marketDataBroker = new Broker.MarketDataBroker(timeProvider, gateway.md, marketDataPublisher, marketDataPersister, messages);
     const positionBroker = new Broker.PositionBroker(timeProvider, broker, gateway.pg, positionPublisher, positionPersister, marketDataBroker);
@@ -393,11 +422,21 @@ const runTradingSystem = async (classes: SimulationClasses): Promise<void> => {
     }
 
     exitingEvent = () => {
+        let osc: Models.OrderStatusReport[] = [];
+        orderCache.allOrders.forEach((order, oid) => {
+            const now = new Date().getTime();
+            if (!(order.orderStatus === Models.OrderStatus.New && now - order.time.getTime() > 10 * 1000))
+                osc.push(order);
+        })
+        if (osc.length > 0) {
+            orderCachePersister.persist(new Models.OrderCachePersistable(osc));
+        }
+        orderPersister.persistNow();
         const a = new Models.SerializedQuotesActive(active.savedQuotingMode, timeProvider.utcNow());
         mainLog.info("persisting active to", a.active);
         activePersister.persist(a);
-
-        return orderBroker.cancelOpenOrders();
+        let n = orderBroker.cancelOpenOrders(true);
+        return n;
     };
 
     // event looped blocked timer

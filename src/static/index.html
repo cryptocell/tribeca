@@ -11,16 +11,29 @@
 
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 
-    <title>tribeca [{{ env }}]</title>
+    <title>coinbus [{{ env }}]</title>
     <link rel="icon" href="icon.png">
 
     <style>
-        .buy { color: blue }
-        .sell { color: red }
-        .unknown { color: black }
+        .buy {
+            color: #54a754
+        }
 
-        .black { color: black }
-        .red { color: red }
+        .sell {
+            color: red
+        }
+
+        .unknown {
+            color: black
+        }
+
+        .black {
+            color: black
+        }
+
+        .red {
+            color: red
+        }
 
         .row {
             margin-left: 0;
@@ -58,12 +71,12 @@
             </tr>
             <tr class="active" ng-repeat="level in levels">
                 <td>mkt{{ $index }}</td>
-                <td>{{ level.bidSize|number:2 }}</td>
+                <td ng-class="level.bidClass">{{ level.bidSize|number:2 }}</td>
                 <td ng-class="level.bidClass">{{ level.bidPrice }}</td>
                 <td></td>
                 <td></td>
                 <td ng-class="level.askClass">{{ level.askPrice }}</td>
-                <td>{{ level.askSize|number:2 }}</td>
+                <td ng-class="level.askClass">{{ level.askSize|number:2 }}</td>
             </tr>
         </table>
     </div>
@@ -117,10 +130,11 @@
     <div class="navbar navbar-default" role="navigation">
         <div class="container-fluid">
             <div class="navbar-header">
-                <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target=".navbar-collapse">
+                <button type="button" class="navbar-toggle collapsed" data-toggle="collapse"
+                    data-target=".navbar-collapse">
                     <span class="icon-bar"></span>
                 </button>
-                <a class="navbar-brand" href="#">tribeca</a>
+                <a class="navbar-brand" href="#">coinbus</a>
             </div>
             <div class="navbar-collapse collapse">
                 <ul class="nav navbar-nav navbar-right">
@@ -154,8 +168,8 @@
                 <div class="row">
                     <div class="col-md-1 col-xs-12 text-center">
                         <div class="row">
-                            <button class="col-md-12 col-xs-3" ng-disabled="!pair.active.connected" ng-class="pair.active.getClass()"
-                                ng-click="pair.active.submit()">
+                            <button class="col-md-12 col-xs-3" ng-disabled="!pair.active.connected"
+                                ng-class="pair.active.getClass()" ng-click="pair.active.submit()">
                                 {{ pair_name }}
                             </button>
 
@@ -172,11 +186,11 @@
 
                     <div class="col-md-3 col-xs-12">
                         <market-quoting-grid></market-quoting-grid>
-                        <messages-grid></messages-grid>
                     </div>
 
                     <div class="col-md-3 col-xs-12">
                         <trade-list></trade-list>
+                        <messages-grid></messages-grid>
                     </div>
 
                     <div class="col-md-5 col-xs-12">
@@ -202,11 +216,13 @@
                                         <th>trds</th>
                                         <th>/sec</th>
                                         <th colspan="2">
-                                            <span ng-if="!pair.quotingParameters.pending && pair.quotingParameters.connected"
+                                            <span
+                                                ng-if="!pair.quotingParameters.pending && pair.quotingParameters.connected"
                                                 class="text-success">
                                                 Applied
                                             </span>
-                                            <span ng-if="pair.quotingParameters.pending && pair.quotingParameters.connected"
+                                            <span
+                                                ng-if="pair.quotingParameters.pending && pair.quotingParameters.connected"
                                                 class="text-warning">
                                                 Pending
                                             </span>
@@ -219,15 +235,18 @@
                                 <tbody>
                                     <tr class="active">
                                         <td>
-                                            <select class="form-control input-sm" ng-model="pair.quotingParameters.display.mode"
+                                            <select class="form-control input-sm"
+                                                ng-model="pair.quotingParameters.display.mode"
                                                 ng-options="x.val as x.str for x in pair.quotingParameters.availableQuotingModes"></select>
                                         </td>
                                         <td>
-                                            <select class="form-control input-sm" ng-model="pair.quotingParameters.display.fvModel"
+                                            <select class="form-control input-sm"
+                                                ng-model="pair.quotingParameters.display.fvModel"
                                                 ng-options="x.val as x.str for x in pair.quotingParameters.availableFvModels"></select>
                                         </td>
                                         <td>
-                                            <select class="form-control input-sm" ng-model="pair.quotingParameters.display.autoPositionMode"
+                                            <select class="form-control input-sm"
+                                                ng-model="pair.quotingParameters.display.autoPositionMode"
                                                 ng-options="x.val as x.str for x in pair.quotingParameters.availableAutoPositionModes"></select>
                                         </td>
                                         <td>
@@ -247,10 +266,12 @@
                                                 ng-model="pair.quotingParameters.display.positionDivergence">
                                         </td>
                                         <td>
-                                            <input type="checkbox" ng-model="pair.quotingParameters.display.ewmaProtection">
+                                            <input type="checkbox"
+                                                ng-model="pair.quotingParameters.display.ewmaProtection">
                                         </td>
                                         <td>
-                                            <input type="checkbox" ng-model="pair.quotingParameters.display.aggressivePositionRebalancing">
+                                            <input type="checkbox"
+                                                ng-model="pair.quotingParameters.display.aggressivePositionRebalancing">
                                         </td>
                                         <td>
                                             <input class="form-control input-sm" type="number" onClick="this.select()"
@@ -266,8 +287,8 @@
                                         </td>
                                         <td>
                                             <input class="btn btn-default btn col-md-1 col-xs-6" style="width:50px"
-                                                type="submit" ng-click="pair.quotingParameters.submit()" ng-disabled="!pair.quotingParameters.connected"
-                                                value="Save" />
+                                                type="submit" ng-click="pair.quotingParameters.submit()"
+                                                ng-disabled="!pair.quotingParameters.connected" value="Save" />
                                         </td>
                                     </tr>
                                 </tbody>

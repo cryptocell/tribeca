@@ -9,6 +9,12 @@ import moment = require("moment");
 import Messaging = require("../common/messaging");
 import Shared = require("./shared_directives");
 
+
+interface MessageLoggerScope extends ng.IScope {
+    messages: MessageViewModel[];
+    messageOptions: any;
+}
+
 class MessageViewModel {
     text: string;
     time: moment.Moment;
@@ -19,12 +25,7 @@ class MessageViewModel {
     }
 }
 
-interface MessageLoggerScope extends ng.IScope {
-    messages: MessageViewModel[];
-    messageOptions: Object;
-}
-
-var MessagesController = ($scope: MessageLoggerScope, $log: ng.ILogService, subscriberFactory: Shared.SubscriberFactory) => {
+var MessagesController = ($scope: MessageLoggerScope, $log: ng.ILogService, subscriberFactory: Shared.SubscriberFactory, uiGridConstants: any) => {
     $scope.messages = [];
     $scope.messageOptions = {
         data: 'messages',
@@ -36,7 +37,11 @@ var MessagesController = ($scope: MessageLoggerScope, $log: ng.ILogService, subs
         enableColumnResize: true,
         sortInfo: { fields: ['time'], directions: ['desc'] },
         columnDefs: [
-            { width: 120, field: 'time', displayName: 't', cellFilter: 'momentFullDate' },
+            {
+                width: 120, field: 'time', displayName: 't', cellFilter: 'momentFullDate',
+                sortingAlgorithm: Shared.fastDiff,
+                sort: { direction: uiGridConstants.DESC, priority: 1 }
+            },
             { width: "*", field: 'text', displayName: 'text' }
         ]
     };

@@ -93,7 +93,7 @@ var TradesListController = ($scope: TradesScope, $log: ng.ILogService, subscribe
 };
 
 var tradeList = (): ng.IDirective => {
-    var template = '<div><div ui-grid="gridOptions" ui-grid-grouping class="table table-striped table-hover table-condensed" style="height: 553px" ></div></div>';
+    var template = '<div><div ui-grid="gridOptions" ui-grid-grouping class="table table-striped table-hover table-condensed" style="height: 458px" ></div></div>';
 
     return {
         template: template,

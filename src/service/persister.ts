@@ -26,6 +26,7 @@ export interface Persistable {
 
 export interface IPersist<T> {
     persist(data: T): void;
+    persistNow?(queue?: T[]): void;
 }
 
 export interface ILoadLatest<T> extends IPersist<T> {
@@ -33,7 +34,7 @@ export interface ILoadLatest<T> extends IPersist<T> {
 }
 
 export interface ILoadAll<T> extends IPersist<T> {
-    loadAll(limit?: number, query?: Object): Promise<T[]>;
+    loadAll(limit?: number, query?: Object, sort?: number): Promise<T[]>;
 }
 
 export class RepositoryPersister<T> implements ILoadLatest<T> {
@@ -42,14 +43,14 @@ export class RepositoryPersister<T> implements ILoadLatest<T> {
     public loadLatest = async (): Promise<T> => {
         const selector = { exchange: this._exchange, pair: this._pair };
         const docs = await this.collection.find(selector)
-                .limit(1)
-                .project({ _id: 0 })
-                .sort({ $natural: -1 })
-                .toArray();
+            .limit(1)
+            .project({ _id: 0 })
+            .sort({ $natural: -1 })
+            .toArray();
 
-        if (docs.length === 0) 
+        if (docs.length === 0)
             return this._defaultParameter;
-        
+
         var v = <T>_.defaults(docs[0], this._defaultParameter);
         return this.converter(v);
     };
@@ -63,7 +64,7 @@ export class RepositoryPersister<T> implements ILoadLatest<T> {
         }
     };
 
-    private converter = (x: any) : T => {
+    private converter = (x: any): T => {
         if (typeof x.exchange === "undefined")
             x.exchange = this._exchange;
         if (typeof x.pair === "undefined")
@@ -83,18 +84,22 @@ export class RepositoryPersister<T> implements ILoadLatest<T> {
 export class Persister<T extends Persistable> implements ILoadAll<T> {
     private _log = log("persister");
 
-    public loadAll = (limit?: number, query?: any): Promise<T[]> => {
+    public loadAll = (limit?: number, query?: any, sort?: number): Promise<T[]> => {
         const selector: Object = { exchange: this._exchange, pair: this._pair };
         _.assign(selector, query);
-        return this.loadInternal(selector, limit);
+        return this.loadInternal(selector, limit, sort);
     };
 
-    private loadInternal = async (selector: Object, limit?: number) : Promise<T[]> => {
-        let query = this.collection.find(selector, {_id: 0});
+    private loadInternal = async (selector: Object, limit?: number, sort?: number): Promise<T[]> => {
+        let query: mongodb.Cursor<any>;
+        if (sort === -1)
+            query = await this.collection.find(selector, { _id: 0 }).sort({ $natural: -1 });
+        else
+            query = await this.collection.find(selector, { _id: 0 }).sort({ $natural: 1 });
 
         if (limit !== null) {
             const count = await this.collection.count(selector);
-            query = query.limit(limit);
+            query = query.limit(limit)
             if (count !== 0)
                 query = query.skip(Math.max(count - limit, 0));
         }
@@ -111,12 +116,12 @@ export class Persister<T extends Persistable> implements ILoadAll<T> {
         return loaded;
     };
 
-    private _persistQueue : T[] = [];
+    private _persistQueue: T[] = [];
     public persist = (report: T) => {
         this._persistQueue.push(report);
     };
 
-    private converter = (x: T) : T => {
+    private converter = (x: T): T => {
         if (typeof x.time === "undefined")
             x.time = new Date();
         if (typeof x.exchange === "undefined")
@@ -126,31 +131,31 @@ export class Persister<T extends Persistable> implements ILoadAll<T> {
         return x;
     };
 
+    public async persistNow(queue?: T[]) {
+        let q = typeof queue === "undefined" ? this._persistQueue : queue;
+        if (this._persistQueue.length === 0) return;
+        const docs = _.map(queue, this.converter);
+        try {
+            const result = await this.collection.insertMany(docs);
+            if (result.result && result.result.ok)
+                this._persistQueue.length = 0;
+            else
+                this._log.warn("Unable to insert, retry or restart soon", this._dbName, this._persistQueue);
+        } catch (err) {
+            this._log.error(err, "Unable to insert, retry or restart soon", this._dbName, this._persistQueue);
+        }
+    }
+
     constructor(
         time: Utils.ITimeProvider,
         private collection: mongodb.Collection,
         private _dbName: string,
         private _exchange: Models.Exchange,
         private _pair: Models.CurrencyPair) {
-            this._log = log("persister:"+_dbName);
+        this._log = log("persister:" + _dbName);
 
-            time.setInterval(async () => {
-                if (this._persistQueue.length === 0) 
-                    return;
-
-                const docs = _.map(this._persistQueue, this.converter);
-
-                try {
-                    const result = await collection.insertMany(docs);
-                    if (result.result && result.result.ok) {
-                        this._persistQueue.length = 0;
-                    }
-                    else {
-                        this._log.warn("Unable to insert, retrying soon", this._dbName, this._persistQueue);
-                    }
-                } catch (err) {
-                    this._log.error(err, "Unable to insert, retrying soon", this._dbName, this._persistQueue);
-                }
-            }, moment.duration(10, "seconds"));
+        time.setInterval(async () => {
+            this.persistNow(this._persistQueue);
+        }, moment.duration(10, "seconds"));
     }
 }

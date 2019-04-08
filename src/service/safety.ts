@@ -23,8 +23,8 @@ export class SafetyCalculator {
     public get latest() { return this._latest; }
     public set latest(val: Models.TradeSafety) {
         if (!this._latest || Math.abs(val.combined - this._latest.combined) > 1e-3
-          || Math.abs(val.buyPing - this._latest.buyPing) >= 1e-2
-          || Math.abs(val.sellPong - this._latest.sellPong) >= 1e-2) {
+            || Math.abs(val.buyPing - this._latest.buyPing) >= 1e-2
+            || Math.abs(val.sellPong - this._latest.sellPong) >= 1e-2) {
             this._latest = val;
             this.NewValue.trigger(this.latest);
 
@@ -47,7 +47,7 @@ export class SafetyCalculator {
         _repo.NewParameters.on(_ => this.computeQtyLimit());
         _qlParams.NewParameters.on(_ => this.computeQtyLimit());
         _broker.Trade.on(this.onTrade);
-        
+
         _timeProvider.setInterval(this.computeQtyLimit, moment.duration(1, "seconds"));
     }
 
@@ -80,33 +80,34 @@ export class SafetyCalculator {
         var _buyPq = 0;
         var _sellPq = 0;
         for (var ti = this._broker._trades.length - 1; ti > -1; ti--) {
-          if (this._broker._trades[ti].side == Models.Side.Bid && buyPq<settings.size) {
-            _buyPq = Math.min(settings.size - buyPq, this._broker._trades[ti].quantity);
-            buyPing += this._broker._trades[ti].price * _buyPq;
-            buyPq += _buyPq;
-          }
-          if (this._broker._trades[ti].side == Models.Side.Ask && sellPq<settings.size) {
-            _sellPq = Math.min(settings.size - sellPq, this._broker._trades[ti].quantity);
-            sellPong += this._broker._trades[ti].price * _sellPq;
-            sellPq += _sellPq;
-          }
-          if (buyPq>=settings.size && sellPq>=settings.size) break;
+            if (this._broker._trades[ti].side == Models.Side.Bid && buyPq < settings.size) {
+                _buyPq = Math.min(settings.size - buyPq, this._broker._trades[ti].quantity);
+                buyPing += this._broker._trades[ti].price * _buyPq;
+                buyPq += _buyPq;
+            }
+            if (this._broker._trades[ti].side == Models.Side.Ask && sellPq < settings.size) {
+                _sellPq = Math.min(settings.size - sellPq, this._broker._trades[ti].quantity);
+                sellPong += this._broker._trades[ti].price * _sellPq;
+                sellPq += _sellPq;
+            }
+            if (buyPq >= settings.size && sellPq >= settings.size) break;
         }
 
         if (buyPq) buyPing /= buyPq;
         if (sellPq) sellPong /= sellPq;
 
-        var orderTrades = (input: Models.Trade[], direction: number): Models.Trade[]=> {
+        var orderTrades = (input: Models.Trade[], direction: number): Models.Trade[] => {
             return _.chain(input)
                 .filter(o => !this.isOlderThan(o, settings))
                 .sortBy((t: Models.Trade) => direction * t.price)
                 .value();
         };
 
-        this._buys = orderTrades(this._buys, -1);
+        //MARK: Only count trades in tradeRateSeconds
         this._sells = orderTrades(this._sells, 1);
+        this._buys = orderTrades(this._buys, -1);
 
-        // don't count good trades against safety
+        //MARK: Remove good trades before checking safty. Don't count good trades against safety
         while (_.size(this._buys) > 0 && _.size(this._sells) > 0) {
             var sell = _.last(this._sells);
             var buy = _.last(this._buys);
@@ -126,6 +127,7 @@ export class SafetyCalculator {
             }
         }
 
+        //MARK: Return total trades(times of size) without profit.
         var computeSafety = (t: Models.Trade[]) => t.reduce((sum, t) => sum + t.quantity, 0) / this._qlParams.latest.size;
 
         this.latest = new Models.TradeSafety(computeSafety(this._buys), computeSafety(this._sells),

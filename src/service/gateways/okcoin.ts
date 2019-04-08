@@ -54,9 +54,11 @@ interface OkCoinTradeMessage {
 }
 
 interface OrderAck {
-    result: boolean; // true or false
-    order_id: string;
-    client_oid: string;
+    result?: boolean; // true or false
+    order_id?: string;
+    client_oid?: string;
+    code?: number;
+    message: string;
 }
 
 interface SignedMessage {
@@ -100,12 +102,10 @@ interface OkCoinOrderStatus {
 interface SubscriptionRequest extends SignedMessage { }
 
 class OkCoinWebsocket {
+
     send = <T>(operation: string, args: any, cb?: () => void) => {
         let subsReq: any = { op: operation };
-
-        if (args !== null)
-            subsReq.args = args;
-
+        if (args !== null) subsReq.args = args;
         this._ws.send(JSON.stringify(subsReq), (e: Error) => {
             if (!e && cb) cb();
         });
@@ -127,33 +127,21 @@ class OkCoinWebsocket {
     }
 
     private onMessage = (raw: any) => {
-
         try {
-            if (!(typeof raw === 'string')) {
-                raw = pako.inflateRaw(raw, { to: 'string' });
-            }
-
-            this._log.info({ "onMessage received": raw }, "Okex websocket on message!");
+            if (!(typeof raw === 'string')) raw = pako.inflateRaw(raw, { to: 'string' });
+            // this._log.info("Okex websocket on message!");
             this.resetTimer();
             let t = Utils.date();
 
-            if (typeof raw !== "undefined" && raw === this._heartbeatPong) {
-                return;
-            }
+            if (typeof raw !== "undefined" && raw === this._heartbeatPong) return;
             let msg: OkCoinMessageIncomingMessage = JSON.parse(raw);
-            if (typeof msg.event !== "undefined" && msg.event == "subscribe") {
-                return;
-            }
+            if (typeof msg.event !== "undefined" && msg.event == "subscribe") return;
             if (typeof msg.event !== "undefined" && msg.event == "unsubscribe") {
-                setTimeout(() => {
-                    this.send("subscribe", [msg.channel]);
-                }, 1000);
+                setTimeout(() => { this.send("subscribe", [msg.channel]); }, 1000);
                 return;
             }
             if (typeof msg.event !== "undefined" && msg.event == "login") {
-                if (!msg.success) {
-                    this._log.warn("Unsuccessful login!", msg);
-                }
+                if (!msg.success) this._log.warn("Unsuccessful login!", msg);
                 else {
                     this.LoggedIn = true;
                     this._log.info("Successfully login!", msg);
@@ -161,8 +149,8 @@ class OkCoinWebsocket {
                         handler();
                         this._log.info("calling handler!");
                     });
-                    return;
                 }
+                return;
             }
 
             if (typeof msg.table !== "undefined" && msg.data !== "undefined" && msg.data.length > 0) {
@@ -174,23 +162,19 @@ class OkCoinWebsocket {
                     handler = this._handlers["spot/depth"];
                 } else if (msg.table == "spot/trade") {
                     handler = this._handlers["spot/trade"];
-                } else if (msg.table == "spot/order") {
+                } else if (msg.table == "spot/order")
                     handler = this._handlers["spot/order"];
-                }
 
                 if (typeof handler === "undefined") {
                     this._log.warn("Got message on unknown topic", msg);
                     return;
                 }
-                if (msg.table == "spot/depth") {
+                if (msg.table == "spot/depth")
                     handler(new Models.Timestamped<OkCoinDepthMessage>(msg.data[0], t));
-                }
-                if (msg.table == "spot/trade") {
+                if (msg.table == "spot/trade")
                     handler(new Models.Timestamped<OkCoinTradeMessage[]>(msg.data, t));
-                }
-                if (msg.table == "spot/order") {
+                if (msg.table == "spot/order")
                     handler(new Models.Timestamped<OkCoinOrderStatus[]>(msg.data, t));
-                }
                 return;
             }
         }
@@ -216,11 +200,7 @@ class OkCoinWebsocket {
     }
 
     private initTimer = () => {
-        this._interval = setInterval(() => {
-            if (this._ws) {
-                this._ws.send(this._heartbeatPing);
-            }
-        }, 25000);
+        this._interval = setInterval(() => { if (this._ws) { this._ws.send(this._heartbeatPing); } }, 25000);
     }
 
     private resetTimer = () => {
@@ -267,17 +247,8 @@ class OkCoinWebsocket {
 class OkCoinMarketDataGateway implements Interfaces.IMarketDataGateway {
     ConnectChanged = new Utils.Evt<Models.ConnectivityStatus>();
 
-    /*  trade = {
-            "table": "spot/trade",
-            "data": [
-                [{"instrument_id": "BTC-USDT","price": "22888","side": "buy","size": "7","timestamp": "2018-11-22T03:58:57.709Z","trade_id": "108223090144493569"}]
-            ]
-        }; */
-
     MarketTrade = new Utils.Evt<Models.GatewayMarketTrade>();
     private onTrade = (trades: Models.Timestamped<OkCoinTradeMessage[]>) => {
-        this._log.info(trades, "Inside onTrade");
-
         _.forEach(trades.data, trade => {
             let px = parseFloat(trade.price);
             let amt = parseFloat(trade.size);
@@ -286,18 +257,6 @@ class OkCoinMarketDataGateway implements Interfaces.IMarketDataGateway {
             this.MarketTrade.trigger(mt);
         });
     };
-
-    /*  depth={
-            "table": "spot/depth",
-            "action": "partial",
-            "data": [{
-                "instrument_id": "ETH-USDT",
-                "asks": [["8.8", "96.99999966", 1],["9", "39", 3],["9.5", "100", 1],["12", "12", 1],["95", "0.42973686", 3],["11111", "1003.99999795", 1]],
-                "bids": [["5", "7", 4],["3", "5", 3],["2.5", "100", 2],["1.5", "100", 1],["1.1", "100", 1],["1", "1004.9998", 1]]
-                "timestamp": "2018-12-18T07:27:13.655Z",
-                "checksum": 468410539
-            }]
-        }; */
 
     // TODO: Sort order?
     MarketData = new Utils.Evt<Models.Market>();
@@ -312,9 +271,7 @@ class OkCoinMarketDataGateway implements Interfaces.IMarketDataGateway {
     };
 
     private checksum = (bids: Models.MarketSide[], asks: Models.MarketSide[], c: number) => {
-        if (bids == null || asks == null) {
-            return false;
-        }
+        if (bids == null || asks == null) return false;
         const buff = [];
         for (let i = 0; i < 25; i++) {
             if (bids[i]) {
@@ -341,31 +298,15 @@ class OkCoinMarketDataGateway implements Interfaces.IMarketDataGateway {
         for (let u = 0, o = 0; u < loop && o < loop; u++ , o++) {
             if (u < ul && o < ol) {
                 if (update[u].price * sort > origin[o].price * sort) {
-                    if (update[u].size > 0) {
-                        ret.push(update[u]);
-                        o--;
-                    }
+                    if (update[u].size > 0) { ret.push(update[u]); o--; }
                 } else if (update[u].price * sort < origin[o].price * sort) {
-                    if (origin[o].size > 0) {
-                        ret.push(origin[o]);
-                        u--;
-                    }
-                } else {
-                    if (update[u].size > 0) {
-                        ret.push(update[u]);
-                    }
-                }
+                    if (origin[o].size > 0) { ret.push(origin[o]); u--; }
+                } else if (update[u].size > 0) ret.push(update[u]);
             } else if (u >= ul && o < ol) {
-                if (origin[o].size > 0) {
-                    ret.push(origin[o]);
-                }
+                if (origin[o].size > 0) ret.push(origin[o]);
             } else if (u < ul && o >= ol) {
-                if (update[u].size > 0) {
-                    ret.push(update[u]);
-                }
-            } else {
-                break;
-            }
+                if (update[u].size > 0) ret.push(update[u]);
+            } else break;
         }
         return ret;
     }
@@ -407,6 +348,8 @@ class OkCoinMarketDataGateway implements Interfaces.IMarketDataGateway {
             if (cs == Models.ConnectivityStatus.Connected) {
                 _socket.send("subscribe", depthChannel);
                 _socket.send("subscribe", tradesChannel);
+            } else {
+                //TODO:
             }
         });
     }
@@ -417,18 +360,20 @@ class OkCoinOrderEntryGateway implements Interfaces.IOrderEntryGateway {
     ConnectChanged = new Utils.Evt<Models.ConnectivityStatus>();
 
     generateClientOrderId = () => {
-        return shortId.generate().replace(/[-_]/g, "X");
+        return shortId.generate().replace(/_/g, "XX").replace(/-/g, "YY");
     };
 
     supportsCancelAllOpenOrders = (): boolean => { return false; };
     cancelAllOpenOrders = (): Q.Promise<number> => { return Q(0); };
 
-    public cancelsByClientOrderId = false;
+    public cancelsByClientOrderId = true;
     // let's really hope there's no race conditions on their end -- we're assuming here that orders sent first
     // will be acked first, so we can match up orders and their acks
     private _ordersWaitingForAckQueue = [];
 
     sendOrder = (order: Models.OrderStatusReport) => {
+        this._log.info("To Send Order [ %s ]", order.orderId);
+
         let o: Order = {
             instrument_id: this._symbolProvider.symbol,
             type: order.type === Models.OrderType.Limit ? "limit" : "market",
@@ -447,50 +392,93 @@ class OkCoinOrderEntryGateway implements Interfaces.IOrderEntryGateway {
         let jsonString = JSON.stringify(o);
         this._http.post("/api/spot/v3/orders", jsonString).then((msg: Models.Timestamped<OrderAck>) => {
             let orderAcceptTime = Utils.date();
-
             let osr: Models.OrderStatusUpdate = {
-                orderId: msg.data.client_oid,
-                time: msg.time,
+                exchange: order.exchange,
+                pair: order.pair,
+                side: order.side,
+                source: order.source,
+                type: order.type,
+                timeInForce: order.timeInForce,
+                preferPostOnly: order.preferPostOnly,
+                quantity: order.quantity,
+                price: order.price,
+                time: order.time,
                 computationalLatency: Utils.fastDiff(orderAcceptTime, order.time)
             };
-            this._log.info("Order Detail! [%o]", o);
-
             if (msg.data.result) {
+                osr.orderId = msg.data.client_oid;
                 osr.exchangeId = msg.data.order_id;
                 osr.orderStatus = Models.OrderStatus.Working;
-                osr.pendingCancel = false;
-                this._log.info("Order Submited! [%o]", msg.data);
-            }
-            else {
-                osr.orderStatus = Models.OrderStatus.Rejected;
-                this._log.warn("Order Rejected! [%o]", msg.data);
+                osr.cancelRejected = false;
+                this._log.info("Order Submited! [ %s || %s ]", msg.data.client_oid, msg.data.order_id);
+            } else {
+                osr.orderId = order.orderId;
+                osr.exchangeId = order.exchangeId;
+                osr.orderStatus = Models.OrderStatus.Cancelled;
+                osr.cancelRejected = false;
+                osr.rejectMessage = msg.data.message;
+                osr.rejectCode = msg.data.code;
+                this._log.warn("Order Rejected! [ %o ]", msg.data);
             }
             this.OrderUpdate.trigger(osr);
+        }, (err) => {
+            order.orderStatus = Models.OrderStatus.Other;
+            this._log.warn("Submit order error or timeout! [ %o ]", err);
+            this.OrderUpdate.trigger(order);
+
         }).done();
     };
 
     cancelOrder = (cancel: Models.OrderStatusReport) => {
-        let c: Cancel = {
-            instrument_id: this._symbolProvider.symbol,
-        };
+        this._log.info("To Cancel Order [ %s || %s ] Status: %s --- PendingCancel: %s --- CancelRejected: %s --- Price: %s", cancel.orderId, cancel.exchangeId, cancel.orderStatus, cancel.pendingCancel, cancel.cancelRejected, cancel.price);
 
+        let c: Cancel = { instrument_id: this._symbolProvider.symbol };
+
+        let cancelId = this.cancelsByClientOrderId ? cancel.orderId : cancel.exchangeId;
         let jsonString = JSON.stringify(c);
-        this._http.post("/api/spot/v3/cancel_orders/" + cancel.exchangeId, jsonString).then((msg: Models.Timestamped<OrderAck>) => {
-            let orderAcceptTime = Utils.date();
-
-            let osr: Models.OrderStatusUpdate = { exchangeId: msg.data.order_id, time: msg.time };
-
-            if (msg.data.result) {
-                osr.orderStatus = Models.OrderStatus.Cancelled;
-                osr.pendingCancel = false;
-            }
-            else {
-                osr.orderStatus = Models.OrderStatus.Rejected;
-                osr.cancelRejected = true;
-            }
-            this.OrderUpdate.trigger(osr);
-        }).done();
-
+        this._http.post("/api/spot/v3/cancel_orders/" + cancelId, jsonString)
+            .then((msg: Models.Timestamped<OrderAck>) => {
+                let osr: Models.OrderStatusUpdate = {
+                    exchange: cancel.exchange,
+                    pair: cancel.pair,
+                    side: cancel.side,
+                    source: cancel.source,
+                    type: cancel.type,
+                    timeInForce: cancel.timeInForce,
+                    preferPostOnly: cancel.preferPostOnly,
+                    quantity: cancel.quantity,
+                    price: cancel.price,
+                    time: cancel.time,
+                };
+                if (msg.data.result) {
+                    osr.orderId = msg.data.client_oid;
+                    osr.exchangeId = msg.data.order_id;
+                    osr.orderStatus = Models.OrderStatus.Cancelled;
+                    osr.cancelRejected = false;
+                    osr.pendingCancel = false;
+                    this._log.info("Order Cancelled! [ %s || %s ]", msg.data.client_oid, msg.data.order_id);
+                } else {
+                    osr.orderId = cancel.orderId;
+                    osr.exchangeId = cancel.exchangeId;
+                    osr.orderStatus = Models.OrderStatus.Rejected;
+                    osr.rejectCode = msg.data.code;
+                    osr.rejectMessage = msg.data.message;
+                    osr.cancelRejected = true;
+                    let errArray = [33027, 33026, 33014];
+                    if (errArray.indexOf(osr.rejectCode) > -1) {
+                        osr.orderStatus = Models.OrderStatus.Cancelled;
+                        osr.pendingCancel = false;
+                    }
+                    this._log.warn("Cancel Order Rejected! [ %s||%s ]: %o", cancel.orderId, cancel.exchangeId, msg.data);
+                }
+                this.OrderUpdate.trigger(osr);
+            }, (err) => {
+                cancel.orderStatus = Models.OrderStatus.Other;
+                cancel.cancelRejected = false;
+                this._log.warn("Cancel order error or timeout! [ %o ]", err);
+                this.OrderUpdate.trigger(cancel);
+            })
+            .done();
     };
 
     replaceOrder = (replace: Models.OrderStatusReport) => {
@@ -524,6 +512,7 @@ class OkCoinOrderEntryGateway implements Interfaces.IOrderEntryGateway {
             let lastPx = price;
 
             let status: Models.OrderStatusUpdate = {
+                orderId: order.client_oid,
                 exchangeId: order.order_id,
                 orderStatus: OkCoinOrderEntryGateway.getStatus(order.status),
                 time: t,
@@ -536,10 +525,14 @@ class OkCoinOrderEntryGateway implements Interfaces.IOrderEntryGateway {
                 cumQuantity: filledSize,
                 lastPrice: lastPx > 0 ? lastPx : undefined,
                 averagePrice: avgPx > 0 ? avgPx : undefined,
-                pendingCancel: false,
                 partiallyFilled: order.status === "part_filled",
-                liquidity: Models.Liquidity.Make
+                liquidity: Models.Liquidity.Make,
+                cancelRejected: false,
+                pendingCancel: false,
+                pendingReplace: false
             };
+            this._log.info("Exchange Order [ %s || %s ] Status: %s --- PendingCancel: %s --- CancelRejected: %s --- Price: %s", status.orderId, status.exchangeId, status.orderStatus, status.pendingCancel, status.cancelRejected, status.price);
+
             this.OrderUpdate.trigger(status);
         })
 
@@ -551,27 +544,22 @@ class OkCoinOrderEntryGateway implements Interfaces.IOrderEntryGateway {
         private _socket: OkCoinWebsocket,
         private _signer: OkCoinMessageSigner,
         private _symbolProvider: OkCoinSymbolProvider) {
-        let timestamp = (Date.now() / 1000).toString();
-        let loginChannel = [this._signer.apiKey,
-        this._signer.passphrase,
-            timestamp,
-        this._signer.ComputeHmac256(timestamp + "GET" + "/users/self/verify")
-        ];
         let orderChannel = ["spot/order:" + _symbolProvider.symbol];
-        _socket.setHandler("spot/order", this.onOrder);
+        this._socket.setHandler("spot/order", this.onOrder);
         // Note：_socket.ConnectChanged VS. this.ConnectChanged
-        _socket.ConnectChanged.on(cs => {
-            this.ConnectChanged.trigger(cs);
-
+        this._socket.ConnectChanged.on(cs => {
             if (cs == Models.ConnectivityStatus.Connected) {
-                if (_socket.LoggedIn) {
-                    _socket.send("subscribe", orderChannel);
+                if (this._socket.LoggedIn) {
+                    this._socket.send("subscribe", orderChannel);
                 } else {
-                    _socket.login(_signer, () => {
-                        _socket.send("subscribe", orderChannel);
+                    this._socket.login(this._signer, () => {
+                        this._socket.send("subscribe", orderChannel);
                         this._log.info(orderChannel, "subscribing orderChannel");
                     });
                 }
+                this.ConnectChanged.trigger(cs);// MARK: Login first
+            } else {
+                //TODO:
             }
         });
     }
@@ -585,34 +573,29 @@ class OkCoinMessageSigner {
     public get apiKey(): string { return this._api_key; };
     public get passphrase(): string { return this._passphrase; };
 
+    public ComputeHmac256 = (message: string): string => {
+        return crypto.createHmac("SHA256", this._secretKey).update(message).digest("base64");
+    }
 
     public signMessage = (m: SignedMessage): SignedMessage => {
         let els: string[] = [];
-
         if (!m.hasOwnProperty("api_key"))
             m.api_key = this._api_key;
-
         let keys = [];
         for (let key in m) {
             if (m.hasOwnProperty(key))
                 keys.push(key);
         }
         keys.sort();
-
         for (let i = 0; i < keys.length; i++) {
             const k = keys[i];
             if (m.hasOwnProperty(k))
                 els.push(m[k]);
         }
-
         let sig = els.join("") + this._secretKey;
         m.sign = crypto.createHash("md5").update(sig).digest("hex").toString().toUpperCase();
         return m;
     };
-
-    public ComputeHmac256 = (message: string): string => {
-        return crypto.createHmac("SHA256", this._secretKey).update(message).digest("base64");
-    }
 
     constructor(config: Config.IConfigProvider) {
         this._api_key = config.GetString("OkCoinApiKey");
@@ -638,7 +621,8 @@ class OkCoinHttp {
                 "OK-ACCESS-TIMESTAMP": timestamp,
                 "OK-ACCESS-PASSPHRASE": this._signer.passphrase
             },
-            method: "POST"
+            method: "POST",
+            timeout: 10 * 1000
         }, (err, resp, body) => {
             if (err) d.reject(err);
             else {
@@ -670,7 +654,9 @@ class OkCoinHttp {
                 "OK-ACCESS-TIMESTAMP": timestamp,
                 "OK-ACCESS-PASSPHRASE": this._signer.passphrase
             },
-            method: "GET"
+            method: "GET",
+            timeout: 10 * 1000
+
         }, (err, resp, body) => {
             if (err) d.reject(err);
             else {
@@ -719,7 +705,6 @@ class OkCoinPositionGateway implements Interfaces.IPositionGateway {
             default: throw new Error("Unsupported currency " + name);
         }
     }
-
 
     private trigger = () => {
         this._http.get("/api/spot/v3/accounts").then(msg => {

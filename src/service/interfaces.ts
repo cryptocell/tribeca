@@ -6,6 +6,8 @@ import Utils = require("./utils");
 import Models = require("../common/models");
 import Messaging = require("../common/messaging");
 import q = require("q");
+import Persister = require("./persister");
+
 
 export interface IExchangeDetailsGateway {
     name(): string;
@@ -17,11 +19,6 @@ export interface IExchangeDetailsGateway {
 }
 
 export interface IGateway {
-    ConnectChanged: Utils.Evt<Models.ConnectivityStatus>;
-}
-
-export interface IBrokerConnectivity {
-    connectStatus: Models.ConnectivityStatus;
     ConnectChanged: Utils.Evt<Models.ConnectivityStatus>;
 }
 
@@ -75,7 +72,7 @@ export interface IOrderBroker extends ITradeBroker {
     cancelOrder(cancel: Models.OrderCancel);
     replaceOrder(replace: Models.CancelReplaceOrder): Models.SentOrder;
     BrokerOrderUpdate: Utils.Evt<Models.OrderStatusReport>;
-    cancelOpenOrders(): void;
+    cancelOpenOrders(ignorePendingCancel: boolean): void;
 }
 
 export interface IPositionBroker {
@@ -89,14 +86,17 @@ export interface IOrderStateCache {
     exchIdsToClientIds: Map<string, string>;
 }
 
+export interface IBrokerConnectivity {
+    connectStatus: Models.ConnectivityStatus;
+    ConnectChanged: Utils.Evt<Models.ConnectivityStatus>;
+}
+
 export interface IBroker extends IBrokerConnectivity {
     makeFee(): number;
     takeFee(): number;
     exchange(): Models.Exchange;
-
     minTickIncrement: number;
     pair: Models.CurrencyPair;
-
     hasSelfTradePrevention: boolean;
 }
 

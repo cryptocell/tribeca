@@ -157,3 +157,19 @@ updated bufferutil to 4.0.0
 4. if you encounter the error about domain certificate not match,put this on the head of file:
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+5.Commands:
+
+$ grunt compile --force
+$ forever start ./tribeca/service/main.js
+$ forever stopall
+
+OR:
+
+$ forever start --minUptime 5000 --spinSleepTime 5000 ./tribeca/service/main.js
+
+OR:
+
+$ forever --minUptime 5000 --spinSleepTime 5000 --killSignal=SIGTERM start  ./tribeca/service/main.js
+
+$ forever stop  ./tribeca/service/main.js

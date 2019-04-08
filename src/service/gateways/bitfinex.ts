@@ -202,8 +202,8 @@ class BitfinexOrderEntryGateway implements Interfaces.IOrderEntryGateway {
     OrderUpdate = new Utils.Evt<Models.OrderStatusUpdate>();
     ConnectChanged = new Utils.Evt<Models.ConnectivityStatus>();
 
-    supportsCancelAllOpenOrders = () : boolean => { return false; };
-    cancelAllOpenOrders = () : Q.Promise<number> => { return Q(0); };
+    supportsCancelAllOpenOrders = (): boolean => { return false; };
+    cancelAllOpenOrders = (): Q.Promise<number> => { return Q(0); };
 
     generateClientOrderId = () => shortId.generate();
 
@@ -338,7 +338,7 @@ class BitfinexOrderEntryGateway implements Interfaces.IOrderEntryGateway {
 
 class RateLimitMonitor {
     private _log = log("tribeca:gateway:rlm");
-    
+
     private _queue = Deque();
     private _durationMs: number;
 
@@ -377,7 +377,7 @@ class BitfinexHttp {
 
         return this.doRequest<T>(opts, url);
     };
-    
+
     // Bitfinex seems to have a race condition where nonces are processed out of order when rapidly placing orders
     // Retry here - look to mitigate in the future by batching orders?
     post = <TRequest, TResponse>(actionUrl: string, msg: TRequest): Q.Promise<Models.Timestamped<TResponse>> => {
@@ -505,7 +505,7 @@ class BitfinexBaseGateway implements Interfaces.IExchangeDetailsGateway {
         return Models.Exchange.Bitfinex;
     }
 
-    constructor(public minTickIncrement: number) {} 
+    constructor(public minTickIncrement: number) { }
 }
 
 class BitfinexSymbolProvider {
@@ -521,7 +521,7 @@ class Bitfinex extends Interfaces.CombinedGateway {
         const monitor = new RateLimitMonitor(60, moment.duration(1, "minutes"));
         const http = new BitfinexHttp(config, monitor);
         const details = new BitfinexBaseGateway(pricePrecision);
-        
+
         const orderGateway = config.GetString("BitfinexOrderDestination") == "Bitfinex"
             ? <Interfaces.IOrderEntryGateway>new BitfinexOrderEntryGateway(timeProvider, details, http, symbol)
             : new NullGateway.NullOrderGateway();
@@ -537,21 +537,21 @@ class Bitfinex extends Interfaces.CombinedGateway {
 interface SymbolDetails {
     pair: string,
     price_precision: number,
-    initial_margin:string,
-    minimum_margin:string,
-    maximum_order_size:string,
-    minimum_order_size:string,
-    expiration:string
+    initial_margin: string,
+    minimum_margin: string,
+    maximum_order_size: string,
+    minimum_order_size: string,
+    expiration: string
 }
 
-export async function createBitfinex(timeProvider: Utils.ITimeProvider, config: Config.IConfigProvider, pair: Models.CurrencyPair) : Promise<Interfaces.CombinedGateway> {
-    const detailsUrl = config.GetString("BitfinexHttpUrl")+"/symbols_details";
+export async function createBitfinex(timeProvider: Utils.ITimeProvider, config: Config.IConfigProvider, pair: Models.CurrencyPair): Promise<Interfaces.CombinedGateway> {
+    const detailsUrl = config.GetString("BitfinexHttpUrl") + "/symbols_details";
     const symbolDetails = await Utils.getJSON<SymbolDetails[]>(detailsUrl);
-    const symbol = new BitfinexSymbolProvider(pair);    
+    const symbol = new BitfinexSymbolProvider(pair);
 
     for (let s of symbolDetails) {
         if (s.pair === symbol.symbol)
-            return new Bitfinex(timeProvider, config, symbol, 10**(-1*s.price_precision));
+            return new Bitfinex(timeProvider, config, symbol, 10 ** (-1 * s.price_precision));
     }
 
     throw new Error("cannot match pair to a Bitfinex Symbol " + pair.toString());

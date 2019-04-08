@@ -5,40 +5,35 @@ import Models = require("../../common/models");
 
 export class TopOfTheMarketQuoteStyle implements StyleHelpers.QuoteStyle {
     Mode = Models.QuotingMode.Top;
-    
-    GenerateQuote = (input: StyleHelpers.QuoteInput) : StyleHelpers.GeneratedQuote => {
+    GenerateQuote = (input: StyleHelpers.QuoteInput): StyleHelpers.GeneratedQuote => {
         return computeTopJoinQuote(input);
     };
 }
 
 export class InverseTopOfTheMarketQuoteStyle implements StyleHelpers.QuoteStyle {
     Mode = Models.QuotingMode.InverseTop;
-    
-    GenerateQuote = (input: StyleHelpers.QuoteInput) : StyleHelpers.GeneratedQuote => {
+    GenerateQuote = (input: StyleHelpers.QuoteInput): StyleHelpers.GeneratedQuote => {
         return computeInverseJoinQuote(input);
     };
 }
 
 export class InverseJoinQuoteStyle implements StyleHelpers.QuoteStyle {
     Mode = Models.QuotingMode.InverseJoin;
-    
-    GenerateQuote = (input: StyleHelpers.QuoteInput) : StyleHelpers.GeneratedQuote => {
+    GenerateQuote = (input: StyleHelpers.QuoteInput): StyleHelpers.GeneratedQuote => {
         return computeInverseJoinQuote(input);
     };
 }
 
 export class PingPongQuoteStyle implements StyleHelpers.QuoteStyle {
     Mode = Models.QuotingMode.PingPong;
-
-    GenerateQuote = (input: StyleHelpers.QuoteInput) : StyleHelpers.GeneratedQuote => {
+    GenerateQuote = (input: StyleHelpers.QuoteInput): StyleHelpers.GeneratedQuote => {
         return computePingPongQuote(input);
     };
 }
 
 export class JoinQuoteStyle implements StyleHelpers.QuoteStyle {
     Mode = Models.QuotingMode.Join;
-    
-    GenerateQuote = (input: StyleHelpers.QuoteInput) : StyleHelpers.GeneratedQuote => {
+    GenerateQuote = (input: StyleHelpers.QuoteInput): StyleHelpers.GeneratedQuote => {
         return computeTopJoinQuote(input);
     };
 }
@@ -58,22 +53,20 @@ function getQuoteAtTopOfMarket(input: StyleHelpers.QuoteInput): StyleHelpers.Gen
 function computeTopJoinQuote(input: StyleHelpers.QuoteInput) {
     var genQt = getQuoteAtTopOfMarket(input);
 
-    if (input.params.mode === Models.QuotingMode.Top && genQt.bidSz > .2) {
-        genQt.bidPx += input.minTickIncrement;
-    }
-
-    var minBid = input.fv.price - input.params.width / 2.0;
-    genQt.bidPx = Math.min(minBid, genQt.bidPx);
-
-    if (input.params.mode === Models.QuotingMode.Top && genQt.askSz > .2) {
+    if (input.params.mode === Models.QuotingMode.Top && genQt.askSz > 0.2)
         genQt.askPx -= input.minTickIncrement;
-    }
 
     var minAsk = input.fv.price + input.params.width / 2.0;
     genQt.askPx = Math.max(minAsk, genQt.askPx);
 
-    genQt.bidSz = input.params.size;
+    if (input.params.mode === Models.QuotingMode.Top && genQt.bidSz > 0.2)
+        genQt.bidPx += input.minTickIncrement;
+
+    var maxBid = input.fv.price - input.params.width / 2.0;
+    genQt.bidPx = Math.min(maxBid, genQt.bidPx);
+
     genQt.askSz = input.params.size;
+    genQt.bidSz = input.params.size;
 
     return genQt;
 }
@@ -88,8 +81,8 @@ function computeInverseJoinQuote(input: StyleHelpers.QuoteInput) {
     }
 
     if (input.params.mode === Models.QuotingMode.InverseTop) {
-        if (genQt.bidSz > .2) genQt.bidPx += input.minTickIncrement;
-        if (genQt.askSz > .2) genQt.askPx -= input.minTickIncrement;
+        if (genQt.askSz > 0.2) genQt.askPx -= input.minTickIncrement;
+        if (genQt.bidSz > 0.2) genQt.bidPx += input.minTickIncrement;
     }
 
     if (mktWidth < (2.0 * input.params.width / 3.0)) {
@@ -97,8 +90,8 @@ function computeInverseJoinQuote(input: StyleHelpers.QuoteInput) {
         genQt.bidPx -= input.params.width / 4.0;
     }
 
-    genQt.bidSz = input.params.size;
     genQt.askSz = input.params.size;
+    genQt.bidSz = input.params.size;
 
     return genQt;
 }
@@ -107,22 +100,20 @@ function computeInverseJoinQuote(input: StyleHelpers.QuoteInput) {
 function computePingPongQuote(input: StyleHelpers.QuoteInput) {
     var genQt = getQuoteAtTopOfMarket(input);
 
-    if (input.params.mode === Models.QuotingMode.PingPong && genQt.bidSz > .2) {
-        genQt.bidPx += input.minTickIncrement;
-    }
-
-    var minBid = input.fv.price - input.params.width / 2.0;
-    genQt.bidPx = Math.min(minBid, genQt.bidPx);
-
-    if (input.params.mode === Models.QuotingMode.PingPong && genQt.askSz > .2) {
+    if (input.params.mode === Models.QuotingMode.PingPong && genQt.askSz > 0.2)
         genQt.askPx -= input.minTickIncrement;
-    }
 
     var minAsk = input.fv.price + input.params.width / 2.0;
     genQt.askPx = Math.max(minAsk, genQt.askPx);
 
-    genQt.bidSz = input.params.size;
+    if (input.params.mode === Models.QuotingMode.PingPong && genQt.bidSz > 0.2)
+        genQt.bidPx += input.minTickIncrement;
+
+    var maxBid = input.fv.price - input.params.width / 2.0;
+    genQt.bidPx = Math.min(maxBid, genQt.bidPx);
+
     genQt.askSz = input.params.size;
+    genQt.bidSz = input.params.size;
 
     return genQt;
 }
